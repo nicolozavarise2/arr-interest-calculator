@@ -5,7 +5,7 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - "arr_interest_calculator_fixed.py"
+      - "arr_interest_calculator.py"
       - "requirements.txt"
       - ".github/workflows/build.yml"
 
@@ -43,4 +43,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: arr-interest-calculator-exe
-          path: build\arr_interest_calculator_fixed.exe
+          path: build\arr_interest_calculator.exe
