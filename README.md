@@ -3,25 +3,25 @@
 This project computes loan interest using risk-free rates (SONIA or SOFR) with a compounded-in-arrears convention and business-day lookback (without observation shift). Margin and Credit Adjustment Spread (CAS) are applied as simple interest after compounding.
 
 ### Core concepts
-- **Accrual period**: from `start_date` (inclusive) to `end_date` (exclusive). Let \( dc = \text{end} - \text{start} \) in calendar days.
-- **Business days**: the set of dates present in the input rate series. Non-listed calendar days are treated as non-business days.
-- **Lookback**: an integer \( L \ge 1 \) in business days. For each business day \( b \) in the accrual period, the observed rate is the rate on the business day that is \( L \) positions earlier than \( b \) in the business-day sequence.
-- **Day-count basis** \( N \): SONIA uses 365 (ACT/365F), SOFR uses 360 (ACT/360).
-- **Margin and CAS**: annualized percentages applied as non-compounded add-ons after the compounded RFR component.
-- **Optional single margin step**: at `margin_change_date` (inclusive), the per-annum margin changes to `margin_after` for the remaining days in the period.
+- Accrual period: from `start_date` (inclusive) to `end_date` (exclusive). Let `dc = end_date - start_date` in calendar days.
+- Business days: the set of dates present in the input rate series. Non-listed calendar days are treated as non-business days.
+- Lookback: an integer `L >= 1` in business days. For each business day `b` in the accrual period, the observed rate is the rate on the business day that is `L` positions earlier than `b` in the business-day sequence.
+- Day-count basis `N`: SONIA uses 365 (ACT/365F), SOFR uses 360 (ACT/360).
+- Margin and CAS: annualized percentages applied as non-compounded add-ons after the compounded RFR component.
+- Optional single margin step: at `margin_change_date` (inclusive), the per-annum margin changes to `margin_after` for the remaining days in the period.
 
 ### Inputs
-- **principal**: notional amount (currency-agnostic).
-- **start_date, end_date**: ISO dates; accrual is \([\text{start}, \text{end})\).
-- **pricing_option**: `SONIA` or `SOFR` (sets \( N = 365 \) or \( N = 360 \)).
-- **lookback**: integer business days \( L \ge 1 \).
-- **rates**: time series of daily RFR values as either:
+- principal: notional amount (currency-agnostic).
+- start_date, end_date: ISO dates; accrual is `[start_date, end_date)`.
+- pricing_option: `SONIA` or `SOFR` (sets `N = 365` or `N = 360`).
+- lookback: integer business days `L >= 1`.
+- rates: time series of daily RFR values as either:
   - Array of `{ date: YYYY-MM-DD, rate: number }`, or
   - CSV (header optional): first column date, second column daily rate.
     - Rate may be percent (e.g., `5.12`) or decimal (`0.0512`). Values > 1 are treated as percent and divided by 100.
-- **margin**: per-annum percentage; applied post-compounding as simple interest.
-- **cas**: per-annum percentage; applied post-compounding as simple interest.
-- **Optional margin step**:
+- margin: per-annum percentage; applied post-compounding as simple interest.
+- cas: per-annum percentage; applied post-compounding as simple interest.
+- Optional margin step:
   - `margin_change_date`: ISO date; if present and within the accrual period, the new margin applies from that date (inclusive).
   - `margin_after`: per-annum percentage used on/after `margin_change_date`.
 
@@ -33,50 +33,54 @@ This project computes loan interest using risk-free rates (SONIA or SOFR) with a
 - `lookback >= 1`.
 
 ### Compounded-in-arrears logic (business-day product)
-Let \( C \) be the compounded factor for the RFR component, initialized to 1. Iterate forward from `start_date` to `end_date` in blocks delimited by business days:
+Let `C` be the compounded factor for the RFR component, initialized to `1`. Iterate forward from `start_date` to `end_date` in blocks delimited by business days:
 
 - For the current calendar date `d`:
   - If `d` is a business day, set `business_day = d` and `next_bd = next business day after d`.
   - Otherwise, set `business_day = previous business day on/before d` and `next_bd = next business day on/after d`.
-  - Let \( n = \min(\text{next\_bd} - d, \text{end} - d) \) be the number of calendar days this business day’s observed rate applies to.
-  - Let `obs = shift_back_business_days(business_day, L)` and \( r = \text{rate}[\text{obs}] \) (decimal, e.g., 0.0512 for 5.12%).
+  - Let `n = min(next_bd - d, end_date - d)` (calendar days) be the number of days this business day’s observed rate applies to.
+  - Let `obs = shift_back_business_days(business_day, L)` and `r = rate[obs]` (decimal, e.g., 0.0512 for 5.12%).
   - Update the compounded factor using the business-day product step:
-    \[
-      C \leftarrow C \times \left(1 + \frac{r \cdot n}{N}\right)
-    \]
+
+```
+C <- C * (1 + (r * n) / N)
+```
+
   - Advance `d += n`.
 
 Notes:
 - This is the standard “compounded in arrears” convention without observation shift; the observed rate for each business day is taken from a prior business day determined by the lookback.
-- For SONIA, the implementation quantizes \( C \) to 18 decimal places after each step to match market precision.
+- For SONIA, the implementation quantizes `C` to 18 decimal places after each step to match market precision.
 
 ### Interest components
-Let \( dc = (\text{end} - \text{start}) \) and \( \text{DCF\_total} = dc / N \).
+Let `dc = (end_date - start_date)` and `DCF_total = dc / N`.
 Handle the single margin step (if any):
 - If `margin_change_date <= start_date`: all days use `margin_after`.
 - If `margin_change_date >= end_date`: the change is ignored.
-- Otherwise, split the period at `margin_change_date` (inclusive) into `pre_days` and `post_days` with day-count fractions \( \text{DCF\_pre} = \text{pre\_days}/N \) and \( \text{DCF\_post} = \text{post\_days}/N \).
+- Otherwise, split the period at `margin_change_date` (inclusive) into `pre_days` and `post_days` with day-count fractions `DCF_pre = pre_days / N` and `DCF_post = post_days / N`.
 
 Compute:
-- **RFR interest**: \( I_{\text{RFR}} = (C - 1) \cdot \text{principal} \)
-- **Margin interest**: \( I_{\text{margin}} = (m_1 \cdot \text{DCF\_pre} + m_2 \cdot \text{DCF\_post}) \cdot \text{principal} \)
-- **CAS interest**: \( I_{\text{CAS}} = \text{cas} \cdot \text{DCF\_total} \cdot \text{principal} \)
-- **Total**: \( I_{\text{total}} = I_{\text{RFR}} + I_{\text{margin}} + I_{\text{CAS}} \)
 
-where \( m_1 \) is the initial margin (decimal) and \( m_2 \) is the post-change margin (or \( m_1 \) if no change applies). Margin and CAS are not compounded.
+```
+I_RFR    = (C - 1) * principal
+I_margin = (m1 * DCF_pre + m2 * DCF_post) * principal
+I_CAS    = cas * DCF_total * principal
+I_total  = I_RFR + I_margin + I_CAS
+```
+
+where `m1` is the initial margin (decimal) and `m2` is the post-change margin (or `m1` if no change applies). Margin and CAS are not compounded.
 
 ### Annualized rates for display
-- **RFR annualized** over the accrual window:
-  \[ r_{\text{RFR,ann}} = (C - 1) \cdot \frac{N}{dc} \quad (dc > 0) \]
-- **Weighted average margin**:
-  \[ m_{\text{weighted}} = \frac{m_1 \cdot \text{DCF\_pre} + m_2 \cdot \text{DCF\_post}}{\text{DCF\_total}} \quad (\text{DCF\_total} > 0) \]
-- **Applicable annualized rate**:
-  \[ r_{\text{applicable}} = r_{\text{RFR,ann}} + m_{\text{weighted}} + \text{cas} \]
+```
+r_RFR_annualized   = (C - 1) * (N / dc)                # if dc > 0
+m_weighted         = (m1 * DCF_pre + m2 * DCF_post) / DCF_total   # if DCF_total > 0
+r_applicable       = r_RFR_annualized + m_weighted + cas
+```
 
 ### Daily detail semantics (for auditability)
 The implementation can emit a per-calendar-day stream with, for each day:
 - `date`, `business_day` (the business day controlling this block), `observation_date`, `daily_rate` (decimal), `cumulative_factor` after the block’s compounding step, `is_business_day` flag.
-- The display-layer “daily ARR interest” is computed as the change in \( C \) since the previous row times principal, and set to 0 on non-business days. This mirrors the GUI behavior, attributing the compounding to business days while still listing non-business calendar days.
+- The display-layer “daily ARR interest” is computed as the change in `C` since the previous row times `principal`, and set to 0 on non-business days. This mirrors the GUI behavior, attributing the compounding to business days while still listing non-business calendar days.
 
 ### Pseudocode
 ```python
@@ -127,7 +131,7 @@ interest_total  = interest_rfr + interest_margin + interest_cas
 
 ### Outputs
 - `interest_total`, `interest_rfr`, `interest_margin`, `interest_cas`
-- `compounded_factor` \( C \)
+- `compounded_factor` (C)
 - `rfr_annualized`, `applicable_annualized_rate`
 - `dc` (calendar days), `N` (basis days)
 - `margin_breakdown`: pre/post day counts and rates (with effective date if applicable)
