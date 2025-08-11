@@ -31,6 +31,10 @@
     pre { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; color: #d1d5db; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); max-height: 400px; overflow: auto; }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
     .hint { font-size: 0.85rem; color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: left; }
+    thead th { position: sticky; top: 0; background: #0a0f1f; z-index: 1; }
+    .table-wrap { max-height: 500px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
   </style>
 </head>
 <body>
@@ -119,7 +123,8 @@
 
         <div class="actions">
           <button class="primary" id="btn_calc">Calculate Interest</button>
-          <button id="btn_daily">Toggle daily details</button>
+          <button id="btn_export_json">Export Results (JSON)</button>
+          <button id="btn_export_csv">Export Detail (CSV)</button>
           <span id="status" class="muted"></span>
         </div>
       </div>
@@ -132,7 +137,26 @@
 
     <div class="card" style="margin-top:1rem">
       <h3>Calculation Detail</h3>
-      <pre id="detail" style="max-height:500px"></pre>
+      <div class="table-wrap">
+        <table id="detail_table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Business Day</th>
+              <th>Observation Date</th>
+              <th>Daily Rate (%)</th>
+              <th>Margin Rate (%)</th>
+              <th>CAS Rate (%)</th>
+              <th>Daily ARR Interest</th>
+              <th>Daily Margin Interest</th>
+              <th>Daily CAS Interest</th>
+              <th>Cumulative Factor</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+          <tbody id="detail_body"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -143,8 +167,9 @@
     const csvUrlBlock = document.getElementById('csv_url_block');
     const statusEl = document.getElementById('status');
     const resultsEl = document.getElementById('results');
-    const detailEl = document.getElementById('detail');
-    let showDaily = false;
+    const detailBody = document.getElementById('detail_body');
+    let lastPayload = null;
+    let lastResult = null;
 
     dataSourceEl.addEventListener('change', () => {
       const v = dataSourceEl.value;
@@ -153,19 +178,14 @@
       csvUrlBlock.style.display = v === 'csv_url' ? '' : 'none';
     });
 
-    document.getElementById('btn_daily').addEventListener('click', () => {
-      showDaily = !showDaily;
-      document.getElementById('btn_daily').textContent = showDaily ? 'Hide daily details' : 'Show daily details';
-    });
-
     document.getElementById('btn_calc').addEventListener('click', async () => {
       statusEl.textContent = 'Calculating...';
       resultsEl.textContent = '';
-      detailEl.textContent = '';
+      detailBody.innerHTML = '';
 
       try {
         const payload = buildPayload();
-        if (showDaily) payload.return_daily_details = true;
+        payload.return_daily_details = true; // always request details like Tkinter tab
         const resp = await fetch('/api/calc', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -173,6 +193,9 @@
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || resp.statusText);
+
+        lastPayload = payload;
+        lastResult = data;
 
         const currency = (payload.pricing_option || 'SONIA').toUpperCase() === 'SONIA' ? 'GBP' : 'USD';
         const resText = [
@@ -186,16 +209,36 @@
         ].join('\n');
         resultsEl.textContent = resText;
 
-        if (Array.isArray(data.daily_details)) {
-          const lines = data.daily_details.map(d => `${d.date} | obs=${d.observation_date} | rate=${(d.daily_rate*100).toFixed(4)}% | C=${Number(d.cumulative_factor).toFixed(8)} | ${d.is_business_day ? 'Business' : 'Non-Business'}`);
-          detailEl.textContent = lines.join('\n');
-        }
+        renderDetailTable(payload, data, currency);
 
         statusEl.textContent = 'Done';
       } catch (e) {
         statusEl.textContent = '';
         resultsEl.textContent = 'Error: ' + (e.message || String(e));
       }
+    });
+
+    document.getElementById('btn_export_json').addEventListener('click', () => {
+      if (!lastResult) return;
+      const blob = new Blob([JSON.stringify({ payload: lastPayload, result: lastResult }, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `arr_results_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    document.getElementById('btn_export_csv').addEventListener('click', () => {
+      if (!lastResult || !Array.isArray(lastResult.daily_details)) return;
+      const { rows, currency } = buildDetailRows(lastPayload, lastResult);
+      const header = ['Date','Business Day','Observation Date','Daily Rate (%)','Margin Rate (%)','CAS Rate (%)','Daily ARR Interest','Daily Margin Interest','Daily CAS Interest','Cumulative Factor','Day Type'];
+      const csv = [header.join(','), ...rows.map(r => r.map(escapeCsv).join(','))].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `arr_detail_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
     });
 
     function buildPayload() {
@@ -242,6 +285,82 @@
       const text = await file.text();
       window.__csvCache = text;
     });
+
+    function renderDetailTable(payload, data, currency) {
+      detailBody.innerHTML = '';
+      if (!Array.isArray(data.daily_details)) return;
+      const { rows } = buildDetailRows(payload, data);
+      const frag = document.createDocumentFragment();
+      for (const r of rows) {
+        const tr = document.createElement('tr');
+        for (const cell of r) {
+          const td = document.createElement('td');
+          td.textContent = cell;
+          tr.appendChild(td);
+        }
+        frag.appendChild(tr);
+      }
+      detailBody.appendChild(frag);
+    }
+
+    function buildDetailRows(payload, data) {
+      const currency = (payload.pricing_option || 'SONIA').toUpperCase() === 'SONIA' ? 'GBP' : 'USD';
+      const N = Number(data.N || (payload.pricing_option.toUpperCase() === 'SONIA' ? 365 : 360));
+      const principal = Number(payload.principal);
+      const margin_pa = toDecimal(payload.margin); // e.g. 2.0 -> 0.02
+      const cas_pa = toDecimal(payload.cas);
+      const eff = payload.margin_change_date ? payload.margin_change_date : null;
+      const margin_after = payload.margin_after !== undefined && payload.margin_after !== null && payload.margin_after !== '' ? toDecimal(payload.margin_after) : margin_pa;
+
+      const rows = [];
+      let prevC = 1; // previous cumulative factor
+      for (const d of data.daily_details) {
+        const dayType = d.is_business_day ? 'Business' : 'Non-Business';
+        const currentC = Number(d.cumulative_factor);
+        let dailyArr = (currentC - prevC) * principal;
+        if (!d.is_business_day) dailyArr = 0;
+
+        // margin applicable for this calendar day
+        const useMargin = eff && d.date >= eff ? margin_after : margin_pa;
+        const dailyMargin = (Number(useMargin) / N) * principal;
+        const dailyCas = (Number(cas_pa) / N) * principal;
+
+        const row = [
+          d.date,
+          d.business_day,
+          d.observation_date,
+          (Number(d.daily_rate) * 100).toFixed(6),
+          (Number(useMargin) * 100).toFixed(6),
+          (Number(cas_pa) * 100).toFixed(6),
+          currency + ' ' + formatMoney(dailyArr),
+          currency + ' ' + formatMoney(dailyMargin),
+          currency + ' ' + formatMoney(dailyCas),
+          Number(d.cumulative_factor).toFixed(8),
+          dayType
+        ];
+        rows.push(row);
+        prevC = currentC;
+      }
+      return { rows, currency };
+    }
+
+    function toDecimal(x) {
+      if (x === undefined || x === null || x === '') return 0;
+      const v = Number(x);
+      return v > 1 ? v/100 : v;
+    }
+
+    function formatMoney(n) {
+      return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function escapeCsv(s) {
+      const str = String(s);
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    }
   </script>
 </body>
 </html>
