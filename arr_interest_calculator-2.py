@@ -1284,6 +1284,60 @@ def parse_sonia_html_regex(html_content: str) -> OrderedDict:
     return rates
 
 def print_currency(amount: Decimal, currency: str = "USD") -> str:
+        """Display calculation results in the results tab."""
+        self.results_text.config(state=tk.NORMAL)
+        self.results_text.delete(1.0, tk.END)
+        
+        # Determine currency based on pricing option
+        currency = "GBP" if po == "SONIA" else "USD"
+        
+        output = f"""
+{'='*60}
+ARR INTEREST CALCULATION RESULTS
+{'='*60}
+
+TRANSACTION DETAILS:
+  Principal Amount: {print_currency(principal, currency)}
+  Pricing Option: {po}
+  Day Count Basis: ACT/{result['N']}
+  Lookback Period: {lookback} business day(s)
+  Accrual Period: {start} to {end} ({result['dc']} calendar days)
+
+RATE INFORMATION:
+  Compounded Factor (RFR only): {result['compounded_factor']:.8f}
+  RFR Annualized Rate: {result['rfr_annualized']:.6%}
+  Margin Rate: {margin_pa:.6%}
+  Credit Adjustment Spread: {cas_pa:.6%}
+  Applicable Annualized Rate: {result['applicable_annualized_rate']:.6%}
+
+"""
+        
+        # Margin breakdown if there's a step change
+        pre = result["margin_breakdown"]["pre"]
+        post = result["margin_breakdown"]["post"]
+        if post["days"] > 0 and pre["days"] > 0:
+            output += f"""MARGIN STEP CHANGE:
+  {pre['days']} day(s) at {pre['margin_pa']:.6%} pa
+  {post['days']} day(s) at {post['margin_pa']:.6%} pa (from {post['effective_date']})
+
+"""
+        
+        output += f"""INTEREST BREAKDOWN:
+  RFR Component:     {print_currency(quantize_money(result['interest_rfr']), currency)}
+  Margin Component:  {print_currency(quantize_money(result['interest_margin']), currency)}
+  CAS Component:     {print_currency(quantize_money(result['interest_cas']), currency)}
+  TOTAL INTEREST:    {print_currency(quantize_money(result['interest_total']), currency)}
+
+Calculation completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        
+        self.results_text.insert(tk.END, output)
+        self.results_text.config(state=tk.DISABLED)
+        
+        # Switch to results tab
+        self.notebook.select(1)
+        
+def print_currency(amount: Decimal, currency: str = "USD") -> str:
     """Format currency amount with proper formatting."""
     return f"{currency} {amount:,.2f}"
 
