@@ -4,6 +4,15 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal, getcontext, ROUND_HALF_UP
 from collections import OrderedDict
 from typing import List, Dict, Optional
+import urllib.request
+import urllib.parse
+import ssl
+
+try:
+    import certifi  # type: ignore
+    HAS_CERTIFI = True
+except Exception:
+    HAS_CERTIFI = False
 
 getcontext().prec = 34
 
@@ -55,6 +64,114 @@ def next_business_day(bdays: List[date], d: date) -> date:
     if ans is None:
         raise ValueError(f"No business day on/after {d} in the supplied rates.")
     return ans
+
+
+def parse_csv_content(content: str) -> OrderedDict:
+    """Parse CSV content with date in first col (YYYY-MM-DD) and rate in second.
+    Accepts header or no header; rates can be percent or decimal."""
+    import csv
+    from io import StringIO
+
+    f = StringIO(content)
+    # Robust dialect detection with fallback
+    try:
+        sniffer = csv.Sniffer()
+        sample = f.read(2048)
+        f.seek(0)
+        try:
+            dialect = sniffer.sniff(sample) if sample else csv.excel
+        except csv.Error:
+            dialect = csv.excel
+    except Exception:
+        dialect = csv.excel
+
+    reader = csv.reader(f, dialect)
+    rows = []
+
+    # Check first row; if not a date, treat as header
+    first = next(reader, None)
+    def is_date_str(x: str) -> bool:
+        try:
+            datetime.strptime(x.strip(), "%Y-%m-%d")
+            return True
+        except Exception:
+            return False
+    if first is not None and (len(first) >= 2 and is_date_str(first[0])):
+        rows.append(first)
+    for row in reader:
+        if not row or len(row) < 2:
+            continue
+        rows.append(row)
+
+    dmap = {}
+    for r in rows:
+        try:
+            d = datetime.strptime(str(r[0]).strip(), "%Y-%m-%d").date()
+        except Exception:
+            continue
+        try:
+            raw = Decimal(str(r[1]).strip())
+        except Exception:
+            continue
+        rate_dec = raw / Decimal(100) if raw > 1 else raw
+        dmap[d] = rate_dec
+
+    if not dmap:
+        raise ValueError("No valid rate data found in CSV content")
+
+    return OrderedDict(sorted(dmap.items(), key=lambda kv: kv[0]))
+
+
+def download_csv_from_url(url: str) -> str:
+    """Download CSV content from an HTTPS URL. Supports Google Drive share links.
+    Tries verified SSL first (using certifi if available), then falls back to a
+    non-verifying SSL context as a last resort to avoid CERTIFICATE_VERIFY_FAILED.
+    """
+    if 'drive.google.com' in url and '/file/d/' in url:
+        try:
+            file_id = url.split('/file/d/')[1].split('/')[0]
+            url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        except Exception:
+            pass
+
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+
+    def _open_with_context(context: ssl.SSLContext) -> bytes:
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context))
+        return opener.open(req, timeout=30)
+
+    # Attempt: verified SSL (prefer certifi if available)
+    try:
+        ctx = ssl.create_default_context()
+        if HAS_CERTIFI:
+            ctx.load_verify_locations(certifi.where())
+        data = _open_with_context(ctx).read()
+    except Exception:
+        # Fallback: non-verifying SSL (insecure; acceptable for public CSV if needed)
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            data = _open_with_context(ctx).read()
+        except Exception as e:
+            raise ValueError(f"Failed to download CSV: {e}")
+
+    # Try to decode using server-declared charset, then utf-8 fallback
+    try:
+        # Make a lightweight HEAD-equivalent to get charset if possible
+        # If not available, default to utf-8
+        charset = 'utf-8'
+        content_type = ''
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                content_type = resp.headers.get('Content-Type', '')
+        except Exception:
+            pass
+        if 'charset=' in content_type:
+            charset = content_type.split('charset=')[-1].split(';')[0].strip()
+        return data.decode(charset or 'utf-8', errors='replace')
+    except Exception:
+        return data.decode('utf-8', errors='replace')
 
 
 def compute_interest_compounded_in_arrears(
@@ -222,17 +339,30 @@ class handler(BaseHTTPRequestHandler):
             margin_pa_after = parse_rate_input(str(margin_after)) if margin_after is not None else None
             margin_change_date = datetime.strptime(margin_change_date_str, "%Y-%m-%d").date() if margin_change_date_str else None
 
-            # rates: array of { date: 'YYYY-MM-DD', rate: number (percent or decimal) }
-            rates_input = data.get('rates', [])
-            if not isinstance(rates_input, list) or len(rates_input) == 0:
-                raise ValueError("'rates' must be a non-empty array of {date, rate}")
+            # Input rates: either explicit 'rates', or 'csv_text', or 'csv_url'
+            rates_input = data.get('rates')
+            csv_text = data.get('csv_text')
+            csv_url = data.get('csv_url')
 
-            rate_map = {}
-            for item in rates_input:
-                d = datetime.strptime(str(item['date']), "%Y-%m-%d").date()
-                raw = Decimal(str(item['rate']))
-                rate_map[d] = raw / Decimal(100) if raw > 1 else raw
-            rates = OrderedDict(sorted(rate_map.items(), key=lambda kv: kv[0]))
+            if rates_input is None and csv_text is None and csv_url is None:
+                raise ValueError("Provide one of: rates[], csv_text, or csv_url")
+
+            if rates_input is not None:
+                if not isinstance(rates_input, list) or len(rates_input) == 0:
+                    raise ValueError("'rates' must be a non-empty array of {date, rate}")
+                rate_map = {}
+                for item in rates_input:
+                    d = datetime.strptime(str(item['date']), "%Y-%m-%d").date()
+                    raw = Decimal(str(item['rate']))
+                    rate_map[d] = raw / Decimal(100) if raw > 1 else raw
+                rates = OrderedDict(sorted(rate_map.items(), key=lambda kv: kv[0]))
+            else:
+                # Parse CSV either from text or by downloading
+                if csv_text is None and csv_url is not None:
+                    csv_text = download_csv_from_url(str(csv_url))
+                if not isinstance(csv_text, str) or len(csv_text.strip()) == 0:
+                    raise ValueError("CSV content is empty or invalid")
+                rates = parse_csv_content(csv_text)
 
             basis = 365 if pricing_option == 'SONIA' else 360
 

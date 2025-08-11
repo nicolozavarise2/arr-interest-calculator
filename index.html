@@ -3,68 +3,244 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ARR Interest Calculator API</title>
+  <title>ARR Interest Calculator</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 2rem; line-height: 1.4; }
-    .container { max-width: 900px; margin: 0 auto; }
-    h1 { margin-bottom: 0.25rem; }
-    code { background: #f5f5f5; padding: 0.1rem 0.3rem; border-radius: 3px; }
-    textarea { width: 100%; height: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow: auto; }
-    button { padding: 0.6rem 1rem; border-radius: 6px; border: 1px solid #cbd5e1; background: white; cursor: pointer; }
-    button:hover { background: #f8fafc; }
-    .flex { display: flex; gap: 1rem; }
-    .col { flex: 1; }
+    :root {
+      --bg: #0b1020;
+      --card: #0f172a;
+      --muted: #94a3b8;
+      --text: #e2e8f0;
+      --accent: #22c55e;
+      --border: #1f2a44;
+    }
+    html, body { height: 100%; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+    h1 { margin: 0 0 0.25rem; font-size: 2rem; }
+    .subtitle { color: var(--muted); margin-bottom: 1.5rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
+    label { display: block; margin: 0.5rem 0 0.25rem; font-size: 0.9rem; color: var(--muted); }
+    input, select, textarea { width: 100%; box-sizing: border-box; background: #0b132b; color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem 0.65rem; }
+    textarea { height: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+    .actions { display: flex; gap: 0.75rem; margin-top: 1rem; }
+    button { padding: 0.6rem 1rem; border-radius: 8px; border: 1px solid var(--border); background: #0b132b; color: var(--text); cursor: pointer; }
+    button.primary { background: var(--accent); color: #052e1b; border: none; font-weight: 600; }
+    .muted { color: var(--muted); }
+    pre { white-space: pre-wrap; word-break: break-word; background: #0a0f1f; color: #d1d5db; padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border); max-height: 400px; overflow: auto; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .hint { font-size: 0.85rem; color: var(--muted); }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>ARR Interest Calculator</h1>
-    <p>This deployment exposes a JSON API at <code>/api/calc</code>. Send a POST request with the input payload, including historical RFR rates.</p>
+    <div class="subtitle">SONIA / SOFR — Compounded-in-Arrears with business-day lookback</div>
 
-    <h2>Try it</h2>
-    <div class="flex">
-      <div class="col">
-        <p>Request body</p>
-        <textarea id="req">{
-  "principal": 1000000,
-  "start_date": "2024-01-01",
-  "end_date": "2024-04-01",
-  "pricing_option": "SONIA",
-  "lookback": 5,
-  "margin": 2.0,
-  "cas": 0.1,
-  "rates": [
-    { "date": "2023-12-20", "rate": 5.12 },
-    { "date": "2023-12-21", "rate": 5.12 },
-    { "date": "2023-12-22", "rate": 5.12 },
-    { "date": "2023-12-27", "rate": 5.12 },
-    { "date": "2023-12-28", "rate": 5.12 },
-    { "date": "2023-12-29", "rate": 5.12 },
-    { "date": "2024-01-02", "rate": 5.12 }
-  ],
-  "return_daily_details": false
-}</textarea>
-        <p><button id="send">POST /api/calc</button></p>
+    <div class="grid">
+      <div class="card">
+        <h3>Inputs</h3>
+        <label>Data Source</label>
+        <select id="data_source">
+          <option value="rates">Manual rates array</option>
+          <option value="csv_upload">CSV upload</option>
+          <option value="csv_url">CSV from URL</option>
+        </select>
+
+        <div id="rates_block">
+          <label>Rates JSON array</label>
+          <textarea id="rates_text" spellcheck="false">[
+  { "date": "2023-12-20", "rate": 5.12 },
+  { "date": "2023-12-21", "rate": 5.12 },
+  { "date": "2023-12-22", "rate": 5.12 },
+  { "date": "2023-12-27", "rate": 5.12 },
+  { "date": "2023-12-28", "rate": 5.12 },
+  { "date": "2023-12-29", "rate": 5.12 },
+  { "date": "2024-01-02", "rate": 5.12 }
+]</textarea>
+        </div>
+
+        <div id="csv_upload_block" style="display:none">
+          <label>Upload CSV file</label>
+          <input id="csv_file" type="file" accept=".csv,text/csv" />
+          <div class="hint">First column: YYYY-MM-DD, Second column: rate (percent or decimal). Header optional.</div>
+        </div>
+
+        <div id="csv_url_block" style="display:none">
+          <label>CSV URL</label>
+          <input id="csv_url" type="url" placeholder="https://..." />
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Principal</label>
+            <input id="principal" type="number" step="0.01" value="1000000" />
+          </div>
+          <div>
+            <label>Start date</label>
+            <input id="start_date" type="date" value="2024-01-01" />
+          </div>
+          <div>
+            <label>End date</label>
+            <input id="end_date" type="date" value="2024-04-01" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Pricing option</label>
+            <select id="pricing_option"><option>SONIA</option><option>SOFR</option></select>
+          </div>
+          <div>
+            <label>Lookback (business days)</label>
+            <input id="lookback" type="number" min="1" step="1" value="5" />
+          </div>
+          <div>
+            <label>CAS (% p.a.)</label>
+            <input id="cas" type="number" step="0.0001" value="0.10" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label>Margin (% p.a.)</label>
+            <input id="margin" type="number" step="0.0001" value="2.00" />
+          </div>
+          <div>
+            <label>Margin change date</label>
+            <input id="margin_change_date" type="date" />
+          </div>
+          <div>
+            <label>New margin (% p.a.)</label>
+            <input id="margin_after" type="number" step="0.0001" placeholder="leave empty" />
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="primary" id="btn_calc">Calculate Interest</button>
+          <button id="btn_daily">Toggle daily details</button>
+          <span id="status" class="muted"></span>
+        </div>
       </div>
-      <div class="col">
-        <p>Response</p>
-        <pre id="res"></pre>
+
+      <div class="card">
+        <h3>Results</h3>
+        <pre id="results"></pre>
       </div>
     </div>
+
+    <div class="card" style="margin-top:1rem">
+      <h3>Calculation Detail</h3>
+      <pre id="detail" style="max-height:500px"></pre>
+    </div>
   </div>
+
   <script>
-    document.getElementById('send').addEventListener('click', async () => {
-      const resEl = document.getElementById('res');
-      resEl.textContent = 'Loading...';
+    const dataSourceEl = document.getElementById('data_source');
+    const ratesBlock = document.getElementById('rates_block');
+    const csvUploadBlock = document.getElementById('csv_upload_block');
+    const csvUrlBlock = document.getElementById('csv_url_block');
+    const statusEl = document.getElementById('status');
+    const resultsEl = document.getElementById('results');
+    const detailEl = document.getElementById('detail');
+    let showDaily = false;
+
+    dataSourceEl.addEventListener('change', () => {
+      const v = dataSourceEl.value;
+      ratesBlock.style.display = v === 'rates' ? '' : 'none';
+      csvUploadBlock.style.display = v === 'csv_upload' ? '' : 'none';
+      csvUrlBlock.style.display = v === 'csv_url' ? '' : 'none';
+    });
+
+    document.getElementById('btn_daily').addEventListener('click', () => {
+      showDaily = !showDaily;
+      document.getElementById('btn_daily').textContent = showDaily ? 'Hide daily details' : 'Show daily details';
+    });
+
+    document.getElementById('btn_calc').addEventListener('click', async () => {
+      statusEl.textContent = 'Calculating...';
+      resultsEl.textContent = '';
+      detailEl.textContent = '';
+
       try {
-        const payload = JSON.parse(document.getElementById('req').value);
-        const resp = await fetch('/api/calc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const text = await resp.text();
-        resEl.textContent = text;
+        const payload = buildPayload();
+        if (showDaily) payload.return_daily_details = true;
+        const resp = await fetch('/api/calc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || resp.statusText);
+
+        const currency = (payload.pricing_option || 'SONIA').toUpperCase() === 'SONIA' ? 'GBP' : 'USD';
+        const resText = [
+          `Compounded Factor (RFR): ${Number(data.compounded_factor).toFixed(8)}`,
+          `RFR Annualized Rate: ${(Number(data.rfr_annualized) * 100).toFixed(6)}%`,
+          `Applicable Annualized Rate: ${(Number(data.applicable_annualized_rate) * 100).toFixed(6)}%`,
+          `Interest (RFR): ${currency} ${Number(data.interest_rfr).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `Interest (Margin): ${currency} ${Number(data.interest_margin).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `Interest (CAS): ${currency} ${Number(data.interest_cas).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
+          `TOTAL INTEREST: ${currency} ${Number(data.interest_total).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`
+        ].join('\n');
+        resultsEl.textContent = resText;
+
+        if (Array.isArray(data.daily_details)) {
+          const lines = data.daily_details.map(d => `${d.date} | obs=${d.observation_date} | rate=${(d.daily_rate*100).toFixed(4)}% | C=${Number(d.cumulative_factor).toFixed(8)} | ${d.is_business_day ? 'Business' : 'Non-Business'}`);
+          detailEl.textContent = lines.join('\n');
+        }
+
+        statusEl.textContent = 'Done';
       } catch (e) {
-        resEl.textContent = e.message || String(e);
+        statusEl.textContent = '';
+        resultsEl.textContent = 'Error: ' + (e.message || String(e));
       }
+    });
+
+    function buildPayload() {
+      const principal = Number(document.getElementById('principal').value);
+      const start_date = document.getElementById('start_date').value;
+      const end_date = document.getElementById('end_date').value;
+      const pricing_option = document.getElementById('pricing_option').value;
+      const lookback = Number(document.getElementById('lookback').value);
+      const margin = getMaybeNumber('margin');
+      const cas = getMaybeNumber('cas');
+      const margin_change_date = document.getElementById('margin_change_date').value || undefined;
+      const margin_after = getMaybeNumber('margin_after');
+
+      const payload = { principal, start_date, end_date, pricing_option, lookback, margin, cas, margin_change_date, margin_after };
+
+      const src = dataSourceEl.value;
+      if (src === 'rates') {
+        try {
+          payload.rates = JSON.parse(document.getElementById('rates_text').value);
+        } catch (e) {
+          throw new Error('Invalid rates JSON array');
+        }
+      } else if (src === 'csv_url') {
+        payload.csv_url = document.getElementById('csv_url').value;
+      } else if (src === 'csv_upload') {
+        const file = document.getElementById('csv_file').files[0];
+        if (!file) throw new Error('Please choose a CSV file');
+        payload.csv_text = window.__csvCache || '';
+        if (!payload.csv_text) throw new Error('CSV file not loaded yet');
+      }
+
+      return payload;
+    }
+
+    function getMaybeNumber(id) {
+      const raw = document.getElementById(id).value;
+      return raw === '' ? undefined : Number(raw);
+    }
+
+    // Load CSV file content into memory when selected
+    document.getElementById('csv_file').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      window.__csvCache = text;
     });
   </script>
 </body>
