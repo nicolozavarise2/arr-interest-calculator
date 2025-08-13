@@ -35,9 +35,11 @@
     th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: left; }
     thead th { position: sticky; top: 0; background: #0a0f1f; z-index: 1; }
     .table-wrap { max-height: 500px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+    .brand-badge { position: fixed; top: 10px; right: 12px; background: #0a0f1f; border: 1px solid var(--border); color: var(--muted); padding: 6px 10px; border-radius: 8px; font-size: 12px; }
   </style>
 </head>
 <body>
+  <div class="brand-badge">Nicolo Zavarise — Tesselate</div>
   <div class="container">
     <h1>ARR Interest Calculator</h1>
     <div class="subtitle">SONIA / SOFR — Compounded-in-Arrears with business-day lookback</div>
@@ -50,6 +52,8 @@
           <option value="rates">Manual rates array</option>
           <option value="csv_upload">CSV upload</option>
           <option value="csv_url">CSV from URL</option>
+          <option value="sonia_auto">SONIA daily rates</option>
+          <option value="sofr_auto">SOFR daily rates</option>
         </select>
 
         <div id="rates_block">
@@ -161,6 +165,10 @@
   </div>
 
   <script>
+    // Constants for provided daily rate sources (Google Drive)
+    const SONIA_CSV_URL = 'https://drive.google.com/uc?export=download&id=1oKqCUHzSOFD47SevIzrLbe6mOcw8L52C';
+    const SOFR_CSV_URL  = 'https://drive.google.com/uc?export=download&id=1oKqCUHzSOFD47SevIzrLbe6mOcw8L52C';
+
     const dataSourceEl = document.getElementById('data_source');
     const ratesBlock = document.getElementById('rates_block');
     const csvUploadBlock = document.getElementById('csv_upload_block');
@@ -176,6 +184,12 @@
       ratesBlock.style.display = v === 'rates' ? '' : 'none';
       csvUploadBlock.style.display = v === 'csv_upload' ? '' : 'none';
       csvUrlBlock.style.display = v === 'csv_url' ? '' : 'none';
+      // If auto sources selected, set pricing option and hide URL block
+      if (v === 'sonia_auto') {
+        document.getElementById('pricing_option').value = 'SONIA';
+      } else if (v === 'sofr_auto') {
+        document.getElementById('pricing_option').value = 'SOFR';
+      }
     });
 
     document.getElementById('btn_calc').addEventListener('click', async () => {
@@ -263,6 +277,12 @@
         }
       } else if (src === 'csv_url') {
         payload.csv_url = document.getElementById('csv_url').value;
+      } else if (src === 'sonia_auto') {
+        payload.csv_url = SONIA_CSV_URL;
+        payload.pricing_option = 'SONIA';
+      } else if (src === 'sofr_auto') {
+        payload.csv_url = SOFR_CSV_URL;
+        payload.pricing_option = 'SOFR';
       } else if (src === 'csv_upload') {
         const file = document.getElementById('csv_file').files[0];
         if (!file) throw new Error('Please choose a CSV file');
