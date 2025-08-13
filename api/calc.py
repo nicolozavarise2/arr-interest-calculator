@@ -381,6 +381,13 @@ class handler(BaseHTTPRequestHandler):
                 return_daily_details=bool(data.get('return_daily_details', False)),
             )
 
+            # Add last available rate date for UI/context
+            try:
+                last_rate_date = max(rates.keys()).isoformat()
+                result["rates_last_date"] = last_rate_date
+            except Exception:
+                pass
+
             return self._send(200, result)
 
         except Exception as e:

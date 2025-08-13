@@ -213,6 +213,7 @@
 
         const currency = (payload.pricing_option || 'SONIA').toUpperCase() === 'SONIA' ? 'GBP' : 'USD';
         const resText = [
+          data.rates_last_date ? `Daily rates updated as of: ${data.rates_last_date}` : null,
           `Compounded Factor (RFR): ${Number(data.compounded_factor).toFixed(8)}`,
           `RFR Annualized Rate: ${(Number(data.rfr_annualized) * 100).toFixed(6)}%`,
           `Applicable Annualized Rate: ${(Number(data.applicable_annualized_rate) * 100).toFixed(6)}%`,
@@ -220,7 +221,7 @@
           `Interest (Margin): ${currency} ${Number(data.interest_margin).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
           `Interest (CAS): ${currency} ${Number(data.interest_cas).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`,
           `TOTAL INTEREST: ${currency} ${Number(data.interest_total).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`
-        ].join('\n');
+        ].filter(Boolean).join('\n');
         resultsEl.textContent = resText;
 
         renderDetailTable(payload, data, currency);
