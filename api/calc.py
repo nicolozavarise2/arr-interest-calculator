@@ -208,7 +208,7 @@ def compute_interest_compounded_in_arrears(
     if last_rate_day < end:
         extended = list(bdays)
         d_ext = last_rate_day + timedelta(days=1)
-        while d_ext < end:
+        while d_ext <= end:
             if d_ext.weekday() < 5:  # Monday=0 .. Friday=4
                 extended.append(d_ext)
             d_ext += timedelta(days=1)
