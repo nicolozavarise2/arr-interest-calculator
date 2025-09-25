@@ -197,8 +197,23 @@ def compute_interest_compounded_in_arrears(
         raise ValueError("No rates provided.")
     bdays_index = {bd: i for i, bd in enumerate(bdays)}
 
+    # Validate we have sufficient history for the first block at the start boundary
     first_needed_bd = previous_business_day(bdays, start)
     _ = shift_back_business_days(bdays_index, bdays, first_needed_bd, lookback_bdays)
+
+    # Extend business-day calendar forward to `end` using weekdays, so we can
+    # compute accruals even if the last available rate is before `end`, provided
+    # lookback can map each forward business day to an earlier observation date.
+    last_rate_day = bdays[-1]
+    if last_rate_day < end:
+        extended = list(bdays)
+        d_ext = last_rate_day + timedelta(days=1)
+        while d_ext < end:
+            if d_ext.weekday() < 5:  # Monday=0 .. Friday=4
+                extended.append(d_ext)
+            d_ext += timedelta(days=1)
+        bdays = extended
+        bdays_index = {bd: i for i, bd in enumerate(bdays)}
 
     N = Decimal(basis_days)
     C = Decimal(1)
@@ -212,7 +227,12 @@ def compute_interest_compounded_in_arrears(
             next_bd = next_business_day(bdays, current_date + timedelta(days=1))
         else:
             business_day = previous_business_day(bdays, current_date)
-            next_bd = next_business_day(bdays, current_date)
+            # If there is no next business day on/after current_date (e.g., past
+            # the last real rate date), treat the next boundary as `end`.
+            try:
+                next_bd = next_business_day(bdays, current_date)
+            except Exception:
+                next_bd = end
 
         days_applied = min((next_bd - current_date).days, (end - current_date).days)
         obs = shift_back_business_days(bdays_index, bdays, business_day, lookback_bdays)
