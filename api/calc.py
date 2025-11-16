@@ -19,8 +19,14 @@ getcontext().prec = 34
 # -------- Core calculation utilities (extracted/minified from desktop app) -------- #
 
 def parse_rate_input(value: str) -> Decimal:
+    """Parse rate input - always treat as percentage (divide by 100)."""
     x = Decimal(str(value).strip())
-    return x / Decimal(100) if x > 1 else x
+    return x / Decimal(100)  # Always divide by 100 to convert percentage to decimal
+
+def parse_cas_input(value: str) -> Decimal:
+    """Parse CAS input - always treat as percentage (divide by 100)."""
+    x = Decimal(str(value).strip())
+    return x / Decimal(100)  # Always divide by 100 to convert percentage to decimal
 
 
 def quantize_money(x: Decimal) -> Decimal:
@@ -352,7 +358,7 @@ class handler(BaseHTTPRequestHandler):
             pricing_option = data.get('pricing_option', 'SONIA').upper()
             lookback = int(data.get('lookback', 5))
             margin_pa = parse_rate_input(str(data.get('margin'))) if 'margin' in data else Decimal('0')
-            cas_pa = parse_rate_input(str(data.get('cas'))) if 'cas' in data else Decimal('0')
+            cas_pa = parse_cas_input(str(data.get('cas'))) if 'cas' in data else Decimal('0')
 
             margin_after = data.get('margin_after')
             margin_change_date_str = data.get('margin_change_date')

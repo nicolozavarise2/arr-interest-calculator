@@ -53,13 +53,16 @@
 
           <div class="mb-2"></div>
           <label class="form-label">Data Source</label>
-          <select id="data_source" class="form-select mb-2">
-            <option value="sonia_auto" selected>SONIA daily rates</option>
-            <option value="sofr_auto">SOFR daily rates</option>
-            <option value="rates">Manual rates array</option>
-            <option value="csv_upload">CSV upload</option>
-            <option value="csv_url">CSV from URL</option>
-          </select>
+          <div class="d-flex gap-2 mb-2">
+            <select id="data_source" class="form-select">
+              <option value="fetched_rates" selected>Fetched Rates</option>
+              <option value="rates">Manual rates array</option>
+              <option value="csv_upload">CSV upload</option>
+              <option value="csv_url">CSV from URL</option>
+            </select>
+            <button class="btn btn-outline-primary" id="btn_update_sonia" title="Refresh SONIA and SOFR rates from Bank of England and New York Fed">Update Rates</button>
+          </div>
+          <div id="update_status" class="small text-muted mb-2"></div>
 
           <div id="rates_block" class="mb-2">
             <label class="form-label">Rates JSON array</label>
@@ -175,10 +178,6 @@
   </div>
 
   <script>
-    // Constants for provided daily rate sources (Google Drive)
-    const SONIA_CSV_URL = 'https://drive.google.com/uc?export=download&id=1oKqCUHzSOFD47SevIzrLbe6mOcw8L52C';
-    const SOFR_CSV_URL  = 'https://drive.google.com/uc?export=download&id=1_5NwX-UJfXkR8cod3d_pfdoajAyKJZ8z';
-
     const dataSourceEl = document.getElementById('data_source');
     const ratesBlock = document.getElementById('rates_block');
     const csvUploadBlock = document.getElementById('csv_upload_block');
@@ -189,21 +188,190 @@
     let lastPayload = null;
     let lastResult = null;
 
+    // Function to fetch both rates (reusable)
+    async function fetchBothRates() {
+      const statusDiv = document.getElementById('update_status');
+      statusDiv.textContent = 'Fetching SONIA and SOFR rates...';
+      
+      const results = { sonia: null, sofr: null };
+      const errors = { sonia: null, sofr: null };
+      
+      // Fetch SONIA rates
+      try {
+        statusDiv.textContent = 'Fetching SONIA rates from Bank of England...';
+        const soniaResp = await fetch('/api/update-sonia', { method: 'GET' });
+        const soniaData = await soniaResp.json();
+        if (!soniaResp.ok) {
+          let errorMsg = soniaData.error || soniaResp.statusText;
+          if (soniaData.debug) {
+            errorMsg += '\n\nDebug: ' + soniaData.debug;
+          }
+          errors.sonia = errorMsg;
+        } else {
+          localStorage.setItem('sonia_rates', JSON.stringify({
+            rates: soniaData.rates,
+            last_date: soniaData.last_date,
+            count: soniaData.count,
+            updated_at: new Date().toISOString()
+          }));
+          results.sonia = { count: soniaData.count, last_date: soniaData.last_date, rates: soniaData.rates };
+        }
+      } catch (e) {
+        errors.sonia = e.message || String(e);
+      }
+      
+      // Fetch SOFR rates
+      try {
+        statusDiv.textContent = 'Fetching SOFR rates from New York Fed...';
+        const sofrResp = await fetch('/api/update-sofr', { method: 'GET' });
+        const sofrData = await sofrResp.json();
+        if (!sofrResp.ok) {
+          let errorMsg = sofrData.error || sofrResp.statusText;
+          if (sofrData.debug) {
+            errorMsg += '\n\nDebug: ' + sofrData.debug;
+          }
+          errors.sofr = errorMsg;
+        } else {
+          localStorage.setItem('sofr_rates', JSON.stringify({
+            rates: sofrData.rates,
+            last_date: sofrData.last_date,
+            count: sofrData.count,
+            updated_at: new Date().toISOString()
+          }));
+          results.sofr = { count: sofrData.count, last_date: sofrData.last_date, rates: sofrData.rates };
+        }
+      } catch (e) {
+        errors.sofr = e.message || String(e);
+      }
+      
+      // Display results with first/last dates
+      const messages = [];
+      if (results.sonia && results.sonia.rates && results.sonia.rates.length > 0) {
+        const firstDate = results.sonia.rates[0].date;
+        const lastDate = results.sonia.rates[results.sonia.rates.length - 1].date;
+        messages.push(`✓ SONIA: ${results.sonia.count} rates (${firstDate} to ${lastDate})`);
+      } else if (errors.sonia) {
+        messages.push(`✗ SONIA: ${errors.sonia}`);
+      }
+      
+      if (results.sofr && results.sofr.rates && results.sofr.rates.length > 0) {
+        const firstDate = results.sofr.rates[0].date;
+        const lastDate = results.sofr.rates[results.sofr.rates.length - 1].date;
+        messages.push(`✓ SOFR: ${results.sofr.count} rates (${firstDate} to ${lastDate})`);
+      } else if (errors.sofr) {
+        messages.push(`✗ SOFR: ${errors.sofr}`);
+      }
+      
+      if (results.sonia && results.sofr) {
+        statusDiv.textContent = messages.join(' | ');
+        statusDiv.className = 'small text-success mb-2';
+      } else if (results.sonia || results.sofr) {
+        statusDiv.textContent = messages.join(' | ');
+        statusDiv.className = 'small text-warning mb-2';
+        statusDiv.style.whiteSpace = 'pre-wrap';
+      } else {
+        statusDiv.textContent = 'Error fetching rates:\n' + messages.join('\n');
+        statusDiv.className = 'small text-danger mb-2';
+        statusDiv.style.whiteSpace = 'pre-wrap';
+      }
+      
+      return { results, errors };
+    }
+
     function updateDataSourceUI() {
       const v = dataSourceEl.value;
       ratesBlock.style.display = v === 'rates' ? '' : 'none';
       csvUploadBlock.style.display = v === 'csv_upload' ? '' : 'none';
       csvUrlBlock.style.display = v === 'csv_url' ? '' : 'none';
-      if (v === 'sonia_auto') {
-        document.getElementById('pricing_option').value = 'SONIA';
-      } else if (v === 'sofr_auto') {
-        document.getElementById('pricing_option').value = 'SOFR';
+      
+      // Auto-fetch rates when "Fetched Rates" is selected and rates aren't loaded
+      if (v === 'fetched_rates') {
+        const soniaStored = localStorage.getItem('sonia_rates');
+        const sofrStored = localStorage.getItem('sofr_rates');
+        
+        if (!soniaStored || !sofrStored) {
+          // Auto-fetch if not loaded
+          fetchBothRates().then(() => {
+            loadStoredRates(); // Refresh display
+          });
+        } else {
+          // Just refresh display
+          loadStoredRates();
+        }
       }
     }
 
     dataSourceEl.addEventListener('change', updateDataSourceUI);
     // Initialize on first load to reflect default selection
     updateDataSourceUI();
+
+    // Load stored rates on page load
+    function loadStoredRates() {
+      const statusDiv = document.getElementById('update_status');
+      const soniaStored = localStorage.getItem('sonia_rates');
+      const sofrStored = localStorage.getItem('sofr_rates');
+      
+      let messages = [];
+      
+      if (soniaStored) {
+        try {
+          const data = JSON.parse(soniaStored);
+          if (data.rates && data.rates.length > 0) {
+            const firstDate = data.rates[0].date;
+            const lastDate = data.rates[data.rates.length - 1].date;
+            messages.push(`✓ SONIA: ${data.count} rates (${firstDate} to ${lastDate})`);
+          } else {
+            messages.push(`✓ SONIA: ${data.count} rates (last: ${data.last_date})`);
+          }
+        } catch (e) {
+          console.error('Failed to parse SONIA rates:', e);
+          messages.push('⚠ SONIA: Parse error');
+        }
+      } else {
+        messages.push('⚠ SONIA: Not loaded');
+      }
+      
+      if (sofrStored) {
+        try {
+          const data = JSON.parse(sofrStored);
+          if (data.rates && data.rates.length > 0) {
+            const firstDate = data.rates[0].date;
+            const lastDate = data.rates[data.rates.length - 1].date;
+            messages.push(`✓ SOFR: ${data.count} rates (${firstDate} to ${lastDate})`);
+          } else {
+            messages.push(`✓ SOFR: ${data.count} rates (last: ${data.last_date})`);
+          }
+        } catch (e) {
+          console.error('Failed to parse SOFR rates:', e);
+          messages.push('⚠ SOFR: Parse error');
+        }
+      } else {
+        messages.push('⚠ SOFR: Not loaded');
+      }
+      
+      if (messages.length > 0) {
+        statusDiv.textContent = messages.join(' | ');
+        if (soniaStored && sofrStored) {
+          statusDiv.className = 'small text-success mb-2';
+        } else {
+          statusDiv.className = 'small text-warning mb-2';
+        }
+      } else {
+        statusDiv.textContent = 'Click "Update Rates" to fetch latest rates from Bank of England and New York Fed';
+        statusDiv.className = 'small text-muted mb-2';
+      }
+    }
+
+    // Check and display stored rates on load
+    loadStoredRates();
+
+    document.getElementById('btn_update_sonia').addEventListener('click', async () => {
+      const btn = document.getElementById('btn_update_sonia');
+      btn.disabled = true;
+      await fetchBothRates();
+      loadStoredRates(); // Refresh display
+      btn.disabled = false;
+    });
 
     document.getElementById('btn_calc').addEventListener('click', async () => {
       statusEl.textContent = 'Calculating...';
@@ -280,12 +448,29 @@
         }
       } else if (src === 'csv_url') {
         payload.csv_url = document.getElementById('csv_url').value;
-      } else if (src === 'sonia_auto') {
-        payload.csv_url = SONIA_CSV_URL;
-        payload.pricing_option = 'SONIA';
-      } else if (src === 'sofr_auto') {
-        payload.csv_url = SOFR_CSV_URL;
-        payload.pricing_option = 'SOFR';
+      } else if (src === 'fetched_rates') {
+        // Use stored rates based on pricing option
+        const po = pricing_option.toUpperCase();
+        const rateType = po === 'SONIA' ? 'sonia' : 'sofr';
+        const rateName = po === 'SONIA' ? 'SONIA' : 'SOFR';
+        const sourceName = po === 'SONIA' ? 'Bank of England' : 'New York Fed';
+        
+        try {
+          const stored = localStorage.getItem(`${rateType}_rates`);
+          if (!stored) {
+            throw new Error(`${rateName} rates not loaded. Please click "Update Rates" first to fetch rates from ${sourceName}.`);
+          }
+          const data = JSON.parse(stored);
+          if (!data.rates || data.rates.length === 0) {
+            throw new Error(`Stored ${rateName} rates are empty. Please click "Update Rates" to refresh.`);
+          }
+          payload.rates = data.rates;
+        } catch (e) {
+          if (e.message) {
+            throw e;  // Re-throw our custom error messages
+          }
+          throw new Error(`Failed to load stored ${rateName} rates. Please click "Update Rates" first.`);
+        }
       } else if (src === 'csv_upload') {
         const file = document.getElementById('csv_file').files[0];
         if (!file) throw new Error('Please choose a CSV file');
@@ -388,8 +573,8 @@
           d.business_day,
           d.observation_date,
           (Number(d.daily_rate) * 100).toFixed(6),
-          (Number(useMargin) * 100).toFixed(6),
-          (Number(cas_pa) * 100).toFixed(6),
+          (Number(useMargin) * 100).toFixed(6),  // Display as percentage
+          (Number(cas_pa) * 100).toFixed(6),      // Display as percentage
           currency + ' ' + formatMoney(dailyArr),
           currency + ' ' + formatMoney(dailyMargin),
           currency + ' ' + formatMoney(dailyCas),
@@ -403,9 +588,10 @@
     }
 
     function toDecimal(x) {
+      // Always treat input as percentage and convert to decimal (divide by 100)
       if (x === undefined || x === null || x === '') return 0;
       const v = Number(x);
-      return v > 1 ? v/100 : v;
+      return v / 100;  // Always divide by 100 to convert percentage to decimal
     }
 
     function formatMoney(n) {
