@@ -533,6 +533,7 @@
         data.rates_last_date ? { label: 'Daily rates updated as of', value: data.rates_last_date } : null,
         { label: 'Compounded Factor (RFR)', value: formatCompoundedFactor(data.compounded_factor, data.rounding_decimals) },
         { label: 'RFR Annualized Rate', value: formatRate(data.rfr_annualized, data.rounding_decimals) + '%' },
+        { label: 'Margin Rate', value: formatRate(data.margin_rate, data.rounding_decimals) + '%' },
         { label: 'Applicable Annualized Rate', value: formatRate(data.applicable_annualized_rate, data.rounding_decimals) + '%' },
         { label: 'Interest (RFR)', value: currency + ' ' + Number(data.interest_rfr).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
         { label: 'Interest (Margin)', value: currency + ' ' + Number(data.interest_margin).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },

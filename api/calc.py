@@ -317,8 +317,9 @@ def compute_interest_compounded_in_arrears(
         else:
             quantize_str = '0.' + '0' * (decimal_precision - 1) + '1'
         applicable_annualized_rate = applicable_annualized_rate.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
-        # Also apply rounding to RFR annualized rate for consistency
+        # Also apply rounding to RFR annualized rate and margin rate for consistency
         rfr_annualized = rfr_annualized.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
+        margin_pa_weighted = margin_pa_weighted.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
 
     # Calculate total interest using the applicable annualized rate
     # interest_total = principal * applicable_annualized_rate * days / basis_days
@@ -331,6 +332,7 @@ def compute_interest_compounded_in_arrears(
         "interest_cas": float(quantize_money(interest_cas)),
         "compounded_factor": float(C),
         "rfr_annualized": float(rfr_annualized),
+        "margin_rate": float(margin_pa_weighted),
         "applicable_annualized_rate": float(applicable_annualized_rate),
         "dc": int(dc),
         "N": int(N),
