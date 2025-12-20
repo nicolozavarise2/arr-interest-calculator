@@ -135,6 +135,26 @@
             </div>
           </div>
 
+          <div class="row g-2 mt-1">
+            <div class="col-md-4">
+              <label class="form-label">Rounding decimals</label>
+              <select id="rounding_decimals" class="form-select">
+                <option value="" selected>No rounding</option>
+                <option value="0">0 decimals</option>
+                <option value="1">1 decimal</option>
+                <option value="2">2 decimals</option>
+                <option value="3">3 decimals</option>
+                <option value="4">4 decimals</option>
+                <option value="5">5 decimals</option>
+                <option value="6">6 decimals</option>
+                <option value="7">7 decimals</option>
+                <option value="8">8 decimals</option>
+                <option value="9">9 decimals</option>
+                <option value="10">10 decimals</option>
+              </select>
+            </div>
+          </div>
+
           <div class="d-flex gap-2 mt-3 align-items-center">
             <button class="btn btn-primary" id="btn_calc">Calculate Interest</button>
             <button class="btn btn-outline-primary" id="btn_export_json">Export Results (JSON)</button>
@@ -436,8 +456,9 @@
       const cas = getMaybeNumber('cas');
       const margin_change_date = document.getElementById('margin_change_date').value || undefined;
       const margin_after = getMaybeNumber('margin_after');
+      const rounding_decimals = document.getElementById('rounding_decimals').value || undefined;
 
-      const payload = { principal, start_date, end_date, pricing_option, lookback, margin, cas, margin_change_date, margin_after };
+      const payload = { principal, start_date, end_date, pricing_option, lookback, margin, cas, margin_change_date, margin_after, rounding_decimals };
 
       const src = dataSourceEl.value;
       if (src === 'rates') {
@@ -510,9 +531,9 @@
     function renderResultsSummary(payload, data, currency) {
       const items = [
         data.rates_last_date ? { label: 'Daily rates updated as of', value: data.rates_last_date } : null,
-        { label: 'Compounded Factor (RFR)', value: Number(data.compounded_factor).toFixed(8) },
-        { label: 'RFR Annualized Rate', value: (Number(data.rfr_annualized) * 100).toFixed(6) + '%' },
-        { label: 'Applicable Annualized Rate', value: (Number(data.applicable_annualized_rate) * 100).toFixed(6) + '%' },
+        { label: 'Compounded Factor (RFR)', value: formatCompoundedFactor(data.compounded_factor, data.rounding_decimals) },
+        { label: 'RFR Annualized Rate', value: formatRate(data.rfr_annualized, data.rounding_decimals) + '%' },
+        { label: 'Applicable Annualized Rate', value: formatRate(data.applicable_annualized_rate, data.rounding_decimals) + '%' },
         { label: 'Interest (RFR)', value: currency + ' ' + Number(data.interest_rfr).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
         { label: 'Interest (Margin)', value: currency + ' ' + Number(data.interest_margin).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
         { label: 'Interest (CAS)', value: currency + ' ' + Number(data.interest_cas).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
@@ -578,7 +599,7 @@
           currency + ' ' + formatMoney(dailyArr),
           currency + ' ' + formatMoney(dailyMargin),
           currency + ' ' + formatMoney(dailyCas),
-          Number(d.cumulative_factor).toFixed(8),
+          formatCompoundedFactor(d.cumulative_factor, lastResult?.rounding_decimals),
           dayType
         ];
         rows.push(row);
@@ -604,6 +625,24 @@
         return '"' + str.replace(/"/g, '""') + '"';
       }
       return str;
+    }
+
+    function formatCompoundedFactor(value, roundingDecimals) {
+      // Compounded factor always shows full precision (no rounding applied)
+      return Number(value).toFixed(8);
+    }
+
+    function formatRate(value, roundingDecimals) {
+      // Format rate (as percentage) with rounding if specified
+      const ratePercent = Number(value) * 100;
+      if (roundingDecimals !== undefined && roundingDecimals !== null && roundingDecimals !== '') {
+        const decimals = parseInt(roundingDecimals, 10);
+        if (!isNaN(decimals) && decimals >= 0) {
+          return ratePercent.toFixed(decimals);
+        }
+      }
+      // Default: show 6 decimals for display
+      return ratePercent.toFixed(6);
     }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

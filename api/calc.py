@@ -193,6 +193,7 @@ def compute_interest_compounded_in_arrears(
     margin_pa_after: Optional[Decimal] = None,
     is_sonia: bool = False,
     return_daily_details: bool = False,
+    rounding_decimals: Optional[int] = None,
 ) -> dict:
     if lookback_bdays < 1:
         raise ValueError("Lookback must be at least 1 business day.")
@@ -223,6 +224,7 @@ def compute_interest_compounded_in_arrears(
 
     N = Decimal(basis_days)
     C = Decimal(1)
+    C_current = Decimal(1)  # Track cumulative factor for daily details
 
     daily_details = [] if return_daily_details else None
 
@@ -246,19 +248,23 @@ def compute_interest_compounded_in_arrears(
 
         period_factor = Decimal(1) + (r * Decimal(days_applied) / N)
         C *= period_factor
-        if is_sonia:
-            C = C.quantize(Decimal('0.000000000000000001'), rounding=ROUND_HALF_UP)
+        # Do not apply rounding to compounded factor - keep full precision
 
         if return_daily_details:
+            # Calculate cumulative factor for each day in this period
             for i in range(days_applied):
                 detail_date = current_date + timedelta(days=i)
                 if detail_date < end:
+                    # Apply daily factor
+                    daily_factor = Decimal(1) + (r * Decimal(1) / N)
+                    C_current *= daily_factor
+                    # Do not apply rounding to cumulative factor in daily details - keep full precision
                     daily_details.append({
                         'date': detail_date.isoformat(),
                         'business_day': business_day.isoformat(),
                         'observation_date': obs.isoformat(),
                         'daily_rate': float(r),
-                        'cumulative_factor': float(C),
+                        'cumulative_factor': float(C_current),
                         'days_applied': days_applied,
                         'is_business_day': (detail_date == business_day)
                     })
@@ -291,14 +297,32 @@ def compute_interest_compounded_in_arrears(
     dcf_pre = Decimal(pre_days) / N
     dcf_post = Decimal(post_days) / N
 
+    # Calculate individual interest components (for display/breakdown)
     interest_rfr = (C - Decimal(1)) * principal
     interest_margin = (m1 * dcf_pre + m2 * dcf_post) * principal
     interest_cas = cas_pa * dcf_total * principal
-    interest_total = interest_rfr + interest_margin + interest_cas
 
     rfr_annualized = (C - Decimal(1)) * (N / dc) if dc != 0 else Decimal(0)
     margin_pa_weighted = ((m1 * dcf_pre + m2 * dcf_post) / (dcf_total if dcf_total != 0 else Decimal(1))) if dc != 0 else Decimal(0)
     applicable_annualized_rate = rfr_annualized + margin_pa_weighted + cas_pa
+
+    # Apply rounding to the all-in rate (applicable annualized rate) if specified
+    # Since we display as percentage (multiply by 100), we need to round the decimal to N+2 decimals
+    # to get N decimals in the percentage display
+    if rounding_decimals is not None:
+        # Round to (rounding_decimals + 2) decimals in decimal form to get rounding_decimals in percentage form
+        decimal_precision = rounding_decimals + 2
+        if decimal_precision == 0:
+            quantize_str = '1'
+        else:
+            quantize_str = '0.' + '0' * (decimal_precision - 1) + '1'
+        applicable_annualized_rate = applicable_annualized_rate.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
+        # Also apply rounding to RFR annualized rate for consistency
+        rfr_annualized = rfr_annualized.quantize(Decimal(quantize_str), rounding=ROUND_HALF_UP)
+
+    # Calculate total interest using the applicable annualized rate
+    # interest_total = principal * applicable_annualized_rate * days / basis_days
+    interest_total = principal * applicable_annualized_rate * dc / N
 
     result = {
         "interest_total": float(quantize_money(interest_total)),
@@ -392,6 +416,9 @@ class handler(BaseHTTPRequestHandler):
 
             basis = 365 if pricing_option == 'SONIA' else 360
 
+            rounding_decimals = data.get('rounding_decimals')
+            rounding_decimals_int = int(rounding_decimals) if rounding_decimals and str(rounding_decimals).strip() else None
+
             result = compute_interest_compounded_in_arrears(
                 principal=principal,
                 start=start,
@@ -405,6 +432,7 @@ class handler(BaseHTTPRequestHandler):
                 margin_pa_after=margin_pa_after,
                 is_sonia=(pricing_option == 'SONIA'),
                 return_daily_details=bool(data.get('return_daily_details', False)),
+                rounding_decimals=rounding_decimals_int,
             )
 
             # Add last available rate date for UI/context
@@ -413,6 +441,10 @@ class handler(BaseHTTPRequestHandler):
                 result["rates_last_date"] = last_rate_date
             except Exception:
                 pass
+
+            # Include rounding_decimals in response for UI display
+            if rounding_decimals_int is not None:
+                result["rounding_decimals"] = rounding_decimals_int
 
             return self._send(200, result)
 
